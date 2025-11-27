@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Secret Santa</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎅</text></svg>">
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // Encode assignment data into URL-safe string
+    const encodeAssignment = (name, givesTo) => {
+      const data = JSON.stringify({ n: name, g: givesTo });
+      return btoa(data).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    };
+
+    // Decode assignment from URL parameter
+    const decodeAssignment = (encoded) => {
+      try {
+        const padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
+        const data = JSON.parse(atob(padded));
+        return { name: data.n, givesTo: data.g };
+      } catch {
+        return null;
+      }
+    };
+
+    // Recipient View - shown when someone clicks their secret link
+    function RecipientView({ assignment }) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-red-100 via-white to-green-100 p-6 flex items-center justify-center">
+          <div className="max-w-md w-full">
+            <div className="text-center mb-8">
+              <div className="text-6xl mb-4">🎅</div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                Secret Santa
+              </h1>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+              <div className="text-5xl mb-4">🎁</div>
+              <h2 className="text-xl text-gray-600 mb-2">Hi {assignment.name}!</h2>
+              <p className="text-gray-500 mb-6">You are the Secret Santa for:</p>
+              
+              <div className="bg-gradient-to-r from-red-500 to-green-500 text-white text-3xl font-bold py-6 px-8 rounded-xl shadow-lg">
+                {assignment.givesTo}
+              </div>
+
+              <div className="mt-8 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                <p className="text-amber-700 text-sm">
+                  🤫 Remember - it's a secret! Don't tell anyone who you're buying for.
+                </p>
+              </div>
+            </div>
+
+            <div className="text-center mt-8 text-gray-400 text-sm">
+              Happy Holidays! 🎄❄️🎁
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Main Admin App
+    function SecretSantaApp() {
+      const [step, setStep] = useState('setup'); // setup | send
+      const [participants, setParticipants] = useState([]);
+      const [currentName, setCurrentName] = useState('');
+      const [currentContact, setCurrentContact] = useState('');
+      const [assignments, setAssignments] = useState(null);
+      const [sentStatus, setSentStatus] = useState({});
+      const [error, setError] = useState('');
+      const [showAssignments, setShowAssignments] = useState(false);
+      const [confirmReveal, setConfirmReveal] = useState(false);
+      const [copiedId, setCopiedId] = useState(null);
+      const [recipientView, setRecipientView] = useState(null);
+
+      const baseUrl = window.location.origin + window.location.pathname;
+
+      // Check if this is a recipient viewing their assignment
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('c');
+        if (code) {
+          const decoded = decodeAssignment(code);
+          if (decoded) {
+            setRecipientView(decoded);
+          }
+        }
+      }, []);
+
+      // Add a participant
+      const addParticipant = () => {
+        if (!currentName.trim()) {
+          setError('Please enter a name');
+          return;
+        }
+        if (!currentContact.trim()) {
+          setError('Please enter a phone number or email');
+          return;
+        }
+        
+        if (participants.some(p => p.name.toLowerCase() === currentName.trim().toLowerCase())) {
+          setError('This name is already added');
+          return;
+        }
+
+        setParticipants([...participants, {
+          id: Date.now(),
+          name: currentName.trim(),
+          contact: currentContact.trim(),
+          isEmail: currentContact.includes('@')
+        }]);
+        setCurrentName('');
+        setCurrentContact('');
+        setError('');
+      };
+
+      // Remove a participant
+      const removeParticipant = (id) => {
+        setParticipants(participants.filter(p => p.id !== id));
+      };
+
+      // Shuffle array (Fisher-Yates)
+      const shuffleArray = (array) => {
+        const shuffled = [...array];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+      };
+
+      // Generate Secret Santa assignments
+      const generateAssignments = () => {
+        if (participants.length < 3) {
+          setError('Need at least 3 participants for Secret Santa');
+          return;
+        }
+
+        const shuffled = shuffleArray(participants);
+        const n = shuffled.length;
+
+        const results = shuffled.map((person, index) => {
+          const givesToIndex = (index + 1) % n;
+          const givesTo = shuffled[givesToIndex].name;
+          return {
+            ...person,
+            givesTo: givesTo,
+            secretLink: `${baseUrl}?c=${encodeAssignment(person.name, givesTo)}`
+          };
+        });
+
+        results.sort((a, b) => a.name.localeCompare(b.name));
+
+        setAssignments(results);
+        setSentStatus({});
+        setShowAssignments(false);
+        setConfirmReveal(false);
+        setStep('send');
+      };
+
+      // Mark as sent
+      const markSent = (id) => {
+        setSentStatus({ ...sentStatus, [id]: true });
+      };
+
+      // Start over
+      const startOver = () => {
+        setStep('setup');
+        setParticipants([]);
+        setCurrentName('');
+        setCurrentContact('');
+        setAssignments(null);
+        setSentStatus({});
+        setError('');
+        setShowAssignments(false);
+        setConfirmReveal(false);
+      };
+
+      // Regenerate (reshuffle)
+      const regenerate = () => {
+        setShowAssignments(false);
+        setConfirmReveal(false);
+        generateAssignments();
+      };
+
+      // Handle reveal click
+      const handleRevealClick = () => {
+        if (!confirmReveal) {
+          setConfirmReveal(true);
+        } else {
+          setShowAssignments(true);
+        }
+      };
+
+      // Hide assignments
+      const hideAssignments = () => {
+        setShowAssignments(false);
+        setConfirmReveal(false);
+      };
+
+      // If this is a recipient viewing their assignment
+      if (recipientView) {
+        return <RecipientView assignment={recipientView} />;
+      }
+
+      const allSent = assignments && Object.keys(sentStatus).length === assignments.length;
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-red-100 via-white to-green-100 p-6">
+          <div className="max-w-2xl mx-auto">
+            {/* Header */}
+            <div className="text-center mb-8">
+              <div className="text-6xl mb-4">🎅</div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                Secret Santa
+              </h1>
+              <p className="text-gray-600">
+                {step === 'setup' && 'Add your participants'}
+                {step === 'send' && 'Send secret links to each person'}
+              </p>
+            </div>
+
+            {/* Setup Step */}
+            {step === 'setup' && (
+              <div className="space-y-6">
+                {/* Add participant form */}
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">➕ Add Participant</h2>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={currentName}
+                        onChange={(e) => { setCurrentName(e.target.value); setError(''); }}
+                        onKeyPress={(e) => e.key === 'Enter' && document.getElementById('contactInput').focus()}
+                        placeholder="Enter name"
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Phone or Email</label>
+                      <input
+                        id="contactInput"
+                        type="text"
+                        value={currentContact}
+                        onChange={(e) => { setCurrentContact(e.target.value); setError(''); }}
+                        onKeyPress={(e) => e.key === 'Enter' && addParticipant()}
+                        placeholder="Phone number or email address"
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400"
+                      />
+                    </div>
+
+                    {error && (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                        ⚠️ {error}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={addParticipant}
+                      className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold transition-all"
+                    >
+                      + Add Participant
+                    </button>
+                  </div>
+                </div>
+
+                {/* Participants list */}
+                {participants.length > 0 && (
+                  <div className="bg-white rounded-xl shadow-lg p-6">
+                    <h2 className="text-xl font-bold text-gray-800 mb-4">
+                      👥 Participants ({participants.length})
+                    </h2>
+                    <div className="space-y-2">
+                      {participants.map((p) => (
+                        <div key={p.id} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-200">
+                          <div>
+                            <span className="font-semibold text-gray-800">{p.name}</span>
+                            <span className="text-sm text-gray-500 ml-2">
+                              {p.isEmail ? '📧' : '📱'} {p.contact}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => removeParticipant(p.id)}
+                            className="text-red-500 hover:text-red-700 px-2"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Generate button */}
+                <button
+                  onClick={generateAssignments}
+                  disabled={participants.length < 3}
+                  className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
+                    participants.length >= 3
+                      ? 'bg-gradient-to-r from-red-500 to-green-500 text-white hover:from-red-600 hover:to-green-600 shadow-lg'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  {participants.length < 3 
+                    ? `Need ${3 - participants.length} more participant${3 - participants.length > 1 ? 's' : ''}`
+                    : '🎄 Generate Secret Santa Assignments 🎄'}
+                </button>
+
+                {/* Info box */}
+                <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                  <h3 className="font-semibold text-amber-800 mb-2">🎁 How it works:</h3>
+                  <ol className="text-sm text-amber-700 space-y-1 list-decimal list-inside">
+                    <li>Add everyone who's participating (including yourself!)</li>
+                    <li>Click generate to randomly assign Secret Santas</li>
+                    <li>Send each person their secret link</li>
+                    <li>They click the link to see their assignment - you never see it!</li>
+                  </ol>
+                </div>
+              </div>
+            )}
+
+            {/* Send Step */}
+            {step === 'send' && assignments && (
+              <div className="space-y-6">
+                {/* Status */}
+                <div className={`rounded-xl p-4 text-center border ${
+                  allSent 
+                    ? 'bg-green-100 border-green-300' 
+                    : 'bg-blue-50 border-blue-200'
+                }`}>
+                  <span className="text-2xl">{allSent ? '🎉' : '📤'}</span>
+                  <h2 className="text-xl font-bold mt-2" style={{ color: allSent ? '#166534' : '#1e40af' }}>
+                    {allSent ? 'All Links Sent!' : 'Send Secret Links'}
+                  </h2>
+                  <p className="text-sm mt-1" style={{ color: allSent ? '#15803d' : '#1d4ed8' }}>
+                    {allSent 
+                      ? 'Everyone can now see their assignment!' 
+                      : `${Object.keys(sentStatus).length} of ${assignments.length} sent`}
+                  </p>
+                </div>
+
+                {/* Secret notice */}
+                <div className="bg-green-50 rounded-xl p-4 border border-green-200 text-center">
+                  <span className="text-2xl">✅</span>
+                  <p className="text-green-700 mt-1">
+                    <strong>Truly Secret!</strong> You only send links - assignments are hidden.
+                  </p>
+                  <p className="text-green-600 text-sm mt-1">
+                    Each person clicks their link to see their own assignment privately.
+                  </p>
+                </div>
+
+                {/* Assignment cards */}
+                <div className="space-y-3">
+                  {assignments.map((assignment) => (
+                    <div 
+                      key={assignment.id} 
+                      className={`bg-white rounded-xl shadow-lg p-4 border-2 transition-all ${
+                        sentStatus[assignment.id] ? 'border-green-300 bg-green-50' : 'border-gray-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">
+                            {sentStatus[assignment.id] ? '✅' : '🎅'}
+                          </span>
+                          <div>
+                            <div className="font-bold text-gray-800">{assignment.name}</div>
+                            <div className="text-sm text-gray-500">
+                              {assignment.isEmail ? '📧' : '📱'} {assignment.contact}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          {!sentStatus[assignment.id] ? (
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(assignment.secretLink);
+                                setCopiedId(assignment.id);
+                                setTimeout(() => setCopiedId(null), 2000);
+                              }}
+                              className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                                copiedId === assignment.id
+                                  ? 'bg-green-500 text-white'
+                                  : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                              }`}
+                            >
+                              {copiedId === assignment.id ? '✓ Copied!' : '📋 Copy Secret Link'}
+                            </button>
+                          ) : (
+                            <span className="text-green-600 font-medium">Sent!</span>
+                          )}
+                          
+                          {!sentStatus[assignment.id] && copiedId !== assignment.id && (
+                            <button
+                              onClick={() => markSent(assignment.id)}
+                              className="px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100"
+                            >
+                              Mark Sent
+                            </button>
+                          )}
+                          
+                          {copiedId === assignment.id && (
+                            <button
+                              onClick={() => {
+                                markSent(assignment.id);
+                                setCopiedId(null);
+                              }}
+                              className="px-3 py-2 rounded-lg text-sm bg-green-100 text-green-700 hover:bg-green-200"
+                            >
+                              ✓ Done
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Hidden assignment - only show if revealed */}
+                      {showAssignments && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <div className="text-sm">
+                            <span className="text-gray-600">{assignment.name} → </span>
+                            <span className="font-bold text-red-600">{assignment.givesTo}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Instructions */}
+                <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
+                  <h3 className="font-semibold text-blue-800 mb-2">📱 How to send:</h3>
+                  <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                    <li>Click "Copy Secret Link" for a person</li>
+                    <li>Open your text/email app and start a message to them</li>
+                    <li>Paste the link (don't look at it!)</li>
+                    <li>Send it, then click "Done" to mark as sent</li>
+                  </ol>
+                  <p className="text-xs text-blue-600 mt-2 italic">
+                    ⚠️ Don't click the link yourself or you'll see their assignment!
+                  </p>
+                </div>
+
+                {/* Reveal button */}
+                {!showAssignments ? (
+                  <div className="space-y-2">
+                    {!confirmReveal ? (
+                      <button
+                        onClick={handleRevealClick}
+                        className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-medium border border-gray-300 transition-all"
+                      >
+                        👁️ Reveal Assignments (Spoiler!)
+                      </button>
+                    ) : (
+                      <div className="bg-amber-50 rounded-xl p-4 border border-amber-300">
+                        <p className="text-amber-800 text-center mb-3">
+                          ⚠️ Are you sure? This will spoil the secret for YOU!
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setConfirmReveal(false)}
+                            className="flex-1 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleRevealClick}
+                            className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium"
+                          >
+                            Yes, Reveal
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={hideAssignments}
+                    className="w-full py-3 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-xl font-medium border border-purple-300 transition-all"
+                  >
+                    🙈 Hide Assignments
+                  </button>
+                )}
+
+                {/* Action buttons */}
+                <div className="space-y-3">
+                  <button
+                    onClick={regenerate}
+                    className="w-full py-3 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl font-medium transition-all border border-blue-200"
+                  >
+                    🔀 Regenerate Assignments
+                  </button>
+                  
+                  <button
+                    onClick={startOver}
+                    className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium border border-gray-300"
+                  >
+                    🔄 Start Over
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="text-center mt-8 text-gray-400 text-sm">
+              Happy Holidays! 🎄❄️🎁
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<SecretSantaApp />);
+  </script>
+</body>
+</html>
